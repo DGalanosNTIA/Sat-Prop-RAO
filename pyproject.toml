@@ -1,0 +1,51 @@
+[project]
+name = "sat-prop-rao"
+version = "0.0.1"
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "click",
+    'importlib-metadata; python_version<"3.10"',
+]
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Ryan McCullough", email = "rmccullough@ntia.gov" }]
+maintainers = [{ name = "Ryan McCullough", email = "rmccullough@ntia.gov" }]
+classifiers = [
+    "Development Status :: 0.0.1",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: RF Propagation Science",
+]
+keywords = [
+    "RF",
+    "if77",
+    "propagation",
+    "satellite",
+    "radio astronomy",
+    "interference",
+]
+
+[project.urls]
+"Homepage" = "https://tbd"
+"Documentation" = "https://tbd"
+"Repository" = "https://tbd"
+"Changelog" = "https://tbd"
+"Bug Tracker" = "https://tbd"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+sat-prop-ptp = "sat_prop_rao.cli:pointToPoint"
+sat-prop-exclusion = "sat_prop_rao.cli:exclusionZone"
