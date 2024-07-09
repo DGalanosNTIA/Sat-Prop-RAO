@@ -16,7 +16,7 @@
 
 ## Installation
 #### latest version
-```pip install git+https://github.com/DGalanosNTIA/Sat-Prop```
+```pip install git+https://github.com/DGalanosNTIA/Sat-Prop-RAO```
 
 ## Usage
 
