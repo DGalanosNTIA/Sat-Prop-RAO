@@ -13,7 +13,13 @@ antennaPatterns = {'isotropic': antenna_pattern.isotropic,
 pathlossModels = {'freespace': propagation_model.freespace}
 
 
-@click.command()
+class CustomContext(click.Context):
+    def make_formatter(self):
+        formatter = super().make_formatter()
+        formatter.width = 200  # Increase the width as needed
+        return formatter
+
+@click.command(context_settings=dict(max_content_width=200))
 @click.option("--freq", default=1e9, help="Frequency (hz) of the RF signal.  [default: 1e9]", show_default=False)
 @click.option("--eirp", default=0.0, help="Equivalent isotropic radiated power (EIRP) in dBm.  [default: 0 dBm]", show_default=False)
 @click.option("--txPos", default='40,-105,400e3', help="Latitude (deg), longitude (deg), elevation (meters) of the transmitter.  [default: 40,-105,400e3]", show_default=False)
@@ -30,7 +36,9 @@ def pointToPoint(freq, eirp, txpos, rxpos, txantenu, rxantenu, txantpattern, rxa
         "pfd dB(W/m^2)":-200.23,
         "epfd dB(W/m^2)":-180.24,
         "rx_epfd_limit dB(W/m^2)":-220.0}"""
-
+    
+    
+    
     rx_dBm, rx_pfd, rx_epfd, rx_epfd_limit =\
         core.pointToPoint(frequency=freq,
                           eirp=eirp,
@@ -45,14 +53,14 @@ def pointToPoint(freq, eirp, txpos, rxpos, txantenu, rxantenu, txantpattern, rxa
                           )
 
     out = {}
-    out['rx dBm'] = rx_dBm
-    out['pfd dB(W/m^2)'] = rx_pfd
-    out['epfd dB(W/m^2)'] = rx_epfd  # I think these units are wrong
-    out['rx_epfd_limit dB(W/m^2)'] = rx_epfd_limit
+    out['rx dBm'] = round(rx_dBm,4)
+    out['pfd dB(W/m^2)'] = round(rx_pfd,4)
+    out['epfd dB(W/m^2)'] = round(rx_epfd,4)  # I think these units are wrong
+    out['rx_epfd_limit dB(W/m^2)'] = round(rx_epfd_limit,4)
     click.echo(json.dumps(out, indent=2))
 
 
-@click.command()
+@click.command(context_settings=dict(max_content_width=200))
 @click.option("--freq", default=1e9, help="Frequency (hz) of the RF signal.  [default: 1e9]", show_default=False)
 @click.option("--eirp", default=0.0, help="Equivalent isotropic radiated power (EIRP) in dBm.  [default: 0 dBm]", show_default=False)
 @click.option("--txAntPattern", type=click.Choice(antennaPatterns), default='basicRotationallySymmetric', help='Select antenna pattern for the transmitter.')
