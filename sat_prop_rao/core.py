@@ -26,8 +26,8 @@ def pointToPoint(frequency=3e9,
                  txDirENU=[0, 0, -1],
                  rxDirENU=[0, 0, 1],  # rx points up by default, tx points down
 
-                 txAntPattern=antenna_pattern.basicRotationallySymmetric,
-                 rxAntPattern=antenna_pattern.basicRotationallySymmetric,
+                 txAntPattern=antenna_pattern.rotationallySymmetric13dB,
+                 rxAntPattern=antenna_pattern.rotationallySymmetric13dB,
                  propModel=propagation_model.freespace,
                  ):
     # need to check that tx/rx are within a relevant distance of one another (e.g. remove case: opposite sides of the world)
@@ -70,14 +70,14 @@ def pointToPoint(frequency=3e9,
 
 def testExclusionZone(frequency=3e9,
                       eirp=0,
-                      txAntPattern=antenna_pattern.basicRotationallySymmetric,
+                      txAntPattern=antenna_pattern.rotationallySymmetric13dB,
                       propModel=propagation_model.freespace
                       ):
     '''Developmental, unverified'''
     # EPFD limit defined by ITU-R RA1631 (todo: list additional relevant regs)
     epfd_limit = regulations.ITU_R_RA1631(frequency, antenna_type='dish')
 
-    # span separation distance
+    # N*N pixels in the heat map
     N = 1000
 
     # min/max distance in logspace to map (todo: make arguments)
@@ -103,18 +103,32 @@ def testExclusionZone(frequency=3e9,
     theta_arr = np.linspace(-pi, pi, N)
     txAntGain_arr = txAntPattern(theta_arr, 0)
 
-    # build surface
+    # build surface (include antennas here)
     X = np.zeros((N, N))
     for i in range(len(rx_pfd)):
         for j in range(len(txAntGain_arr)):
             X[i, j] = rx_pfd[i] + txAntGain_arr[j]
 
-    # find contour line for EPFD limit
+    # find contour line for EPFD limit in case0
     i_contour = np.zeros(N, dtype=int)
     for i in range(X.shape[0]):
         x_line = X[:, i]
         i_contour[i] = int(np.abs(x_line - epfd_limit).argmin())
-    contour = y_axis[i_contour]
+    contour_case0 = y_axis[i_contour]
+    
+    # find contour line for EPFD limit in case0
+    i_contour = np.zeros(N, dtype=int)
+    for i in range(X.shape[0]):
+        x_line = X[:, i]
+        i_contour[i] = int(np.abs(x_line - (epfd_limit + 60)).argmin())
+    contour_case1 = y_axis[i_contour]
+    
+    # find contour line for EPFD limit in case0
+    i_contour = np.zeros(N, dtype=int)
+    for i in range(X.shape[0]):
+        x_line = X[:, i]
+        i_contour[i] = int(np.abs(x_line - (epfd_limit + 100)).argmin())
+    contour_case2 = y_axis[i_contour]
 
     # imshow doesn't seem to handle very large numbers on the axes well in this case
     # so I have to map everything to [0,1] and back out where to place the tick marks
@@ -128,12 +142,16 @@ def testExclusionZone(frequency=3e9,
 
     plt.figure(figsize=(10, 6))
     plt.imshow(X, extent=(-180, 180, 0, 1), aspect='auto')
-    plt.plot(x_axis, contour, 'r')
+    plt.plot(x_axis, contour_case0, 'r')
+    plt.plot(x_axis, contour_case1, 'r')
+    plt.plot(x_axis, contour_case2, 'r')
     plt.gca().set_yticks(ytick_positions, ytick_labels)
     plt.xlabel('Offset Angle (degrees)')
     plt.ylabel('Separation Distance (km)')
     plt.title('Exclusion Zone Test')
-    plt.colorbar()
+    cbar = plt.colorbar()
+    cbar.ax.get_yaxis().labelpad = 15
+    cbar.set_label('EPFD dB(W/(m^2))', rotation=270)
     plt.show()
 
     # todo:

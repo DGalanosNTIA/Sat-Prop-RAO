@@ -1,5 +1,6 @@
 import click
 import json
+import inspect
 import sat_prop_rao.core as core
 import sat_prop_rao.propagation_model as propagation_model
 import sat_prop_rao.antenna_pattern as antenna_pattern
@@ -7,11 +8,15 @@ import sat_prop_rao.antenna_pattern as antenna_pattern
 
 def parseFloatList(s): return [float(x) for x in s.split(',')]
 
+def getModuleFunctions(module):
+    functions_dict = {}
+    for name, obj in inspect.getmembers(module):
+        if inspect.isfunction(obj):
+            functions_dict[name] = obj
+    return functions_dict
 
-antennaPatterns = {'isotropic': antenna_pattern.isotropic,
-                   'basicRotationallySymmetric': antenna_pattern.basicRotationallySymmetric}
-pathlossModels = {'freespace': propagation_model.freespace}
-
+antennaPatterns = getModuleFunctions(antenna_pattern)
+pathlossModels = getModuleFunctions(propagation_model)
 
 class CustomContext(click.Context):
     def make_formatter(self):
@@ -63,7 +68,7 @@ def pointToPoint(freq, eirp, txpos, rxpos, txantenu, rxantenu, txantpattern, rxa
 @click.command(context_settings=dict(max_content_width=200))
 @click.option("--freq", default=1e9, help="Frequency (hz) of the RF signal.  [default: 1e9]", show_default=False)
 @click.option("--eirp", default=0.0, help="Equivalent isotropic radiated power (EIRP) in dBm.  [default: 0 dBm]", show_default=False)
-@click.option("--txAntPattern", type=click.Choice(antennaPatterns), default='basicRotationallySymmetric', help='Select antenna pattern for the transmitter.')
+@click.option("--txAntPattern", type=click.Choice(antennaPatterns), default='rotationallySymmetric13dB', help='Select antenna pattern for the transmitter.')
 @click.option("--propModel", type=click.Choice(pathlossModels), default='freespace', help='Propagation model.')
 def exclusionZone(freq, eirp, txantpattern, propmodel):
     """Estimates the satellite exclusion zone around a typical radio astronomy observatory. Output shows the off-angle, distance contour line
