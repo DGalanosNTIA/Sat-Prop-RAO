@@ -16,6 +16,7 @@
 
 ## Installation
 #### latest version
+Requires: Python 3.7 or greater, pip, git
 ```pip install git+https://github.com/DGalanosNTIA/Sat-Prop-RAO```
 
 ## Usage
