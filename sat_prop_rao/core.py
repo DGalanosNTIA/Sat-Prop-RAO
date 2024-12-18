@@ -17,6 +17,9 @@ from scipy.spatial.transform import Rotation
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import pyplot as plt
 
+TX_EFFICIENCY = .8
+RX_EFFICIENCY = 0.72
+
 
 def pointToPoint(frequency=3e9,
                  eirp=0,
@@ -45,8 +48,8 @@ def pointToPoint(frequency=3e9,
     txTheta = utl.relativeAngle(txToRxHeading, txHeading)
     rxTheta = utl.relativeAngle(-txToRxHeading, rxHeading)
 
-    txAntGain = txAntPattern(txTheta, 0)
-    rxAntGain = rxAntPattern(rxTheta, 0)
+    txAntGain = antenna_pattern.efficiencyAdjustment(txAntPattern(txTheta, 0), TX_EFFICIENCY)
+    rxAntGain = antenna_pattern.efficiencyAdjustment(rxAntPattern(rxTheta, 0), RX_EFFICIENCY)
 
     # calculate pathloss
     distance = norm(txPos - rxPos)
@@ -67,6 +70,90 @@ def pointToPoint(frequency=3e9,
 
     return rx_dBm, rx_pfd, rx_epfd, rx_epfd_limit
 
+def testTxPFD(txLatLonEl = [0, 0, 400e3], tx_f_start = 1.990e9, tx_f_stop = 1.995e9, tx_target = [19.79, 0, 0],
+              txAntPattern = antenna_pattern.ITU_S1528, propModel = propagation_model.freespace, txPowerIn__dBW = 20):
+    radiusEarth__m = 6371e3
+    alt__m = txLatLonEl[2]
+    # map from lat/lon/el to earth-centered earth-fixed (ecef) coordinate system
+    txPos = np.array(utl.wgs84ToEcef(*txLatLonEl))
+    txTargetPos = np.array(utl.wgs84ToEcef(*tx_target))
+
+    txToTxTargetVector = utl.unitVector(txTargetPos - txPos)
+
+    # map from local heading ENU to ecef unit vector corresponding to heading
+    txSubsatelliteVector = np.array(utl.enuToEcefHeading(*[0, 0, -1], *txLatLonEl))
+    txPointingAngle__rad = utl.relativeAngle(txToTxTargetVector, txSubsatelliteVector)
+    print("tx is pointing " + str(np.rad2deg(txPointingAngle__rad)) + " degrees off nadir.")
+    satToTxTargetToEarthAngle__rad = pi-np.arcsin((radiusEarth__m+alt__m)/radiusEarth__m * np.sin(txPointingAngle__rad))
+    print("The Earth center to satellite target to satellite angle is " + str(np.rad2deg(satToTxTargetToEarthAngle__rad)) + " degrees")
+    satElAboveHorizon__rad = satToTxTargetToEarthAngle__rad-pi/2
+    print("The satellite is " + str(np.rad2deg(satElAboveHorizon__rad)) + " degrees above the horizon.")
+    print("The sum of the calculated internal angles is: " + str(np.rad2deg(satToTxTargetToEarthAngle__rad)+np.rad2deg(txPointingAngle__rad) + tx_target[0]-txLatLonEl[0]))
+    if satElAboveHorizon__rad<=0:
+        print("Satellite below horizon.")
+        return None
+
+    print("antenna 100% efficiency gain = " + str(txAntPattern(0,0)))
+    txAntGain__dBi = txAntPattern(0, 0)
+    # txAntGain__dBi = antenna_pattern.efficiencyAdjustment(txAntPattern(0, 0), TX_EFFICIENCY)
+    print("antenna gain = " + str(txAntGain__dBi))
+    # txAntCompensationGain = satGainAdjustment(txPointingAngle, txLatLonEl[2] / 1e3)
+
+
+    min_distance__m = txLatLonEl[2]
+    txChannelBW__MHz = 10 ** ((58 + 2.33) / 10) / 1e6  # ~1.08 MHz
+    print("Tx Channel BW = " + str(txChannelBW__MHz))
+    max_pfd = txPowerIn__dBW + txAntGain__dBi - 10*np.log10(4*pi*min_distance__m**2) - 10*np.log10(txChannelBW__MHz)
+    target_pfd = -80
+    available_padding__dB = max_pfd-target_pfd
+    print("available padding: " + str(available_padding__dB))
+
+    # calculate pathloss
+    tx_f_c = (tx_f_start+tx_f_stop)/2
+    distance__m = norm(txPos - txTargetPos)
+    print("distance = " + str (distance__m))
+    PL = propModel(distance__m, tx_f_c)
+    print("Prop Loss = " + str(PL))
+
+    txAntCompensationGain__dB = 10*np.log10(distance__m**2 / txLatLonEl[2]**2)
+    print("initial Compensation Gain = " + str(txAntCompensationGain__dB))
+    if txAntCompensationGain__dB > available_padding__dB:
+        txAntCompensationGain__dB = available_padding__dB
+    print("Final Compensation Gain = " + str(txAntCompensationGain__dB))
+    print("Compensation Gain = " + str(txAntCompensationGain__dB))
+    # power flux density
+
+
+    pfd = txPowerIn__dBW + txAntGain__dBi - available_padding__dB + txAntCompensationGain__dB - 10*np.log10(4*pi*distance__m**2) - 10*np.log10(txChannelBW__MHz)
+
+    print("Degrees above Horizon = " + str(np.rad2deg(satElAboveHorizon__rad)) + " pfd = " + str(pfd))
+
+    return pfd
+
+def satGainAdjustment(theta__rad, altitude__km):
+    """
+    To do the cdf calculation, we need to realistic adjusted gain of the satellite. The satellites change their gain
+    to achieve their target epfd at the Earth's surface.  This adjustment needs to be considered in order to get an
+    accurate epfd.
+    From "A Framework for Assessing the Interference from NGSO Satellite Systems to a Radio Astronomy System"
+    The compensation gain is dependent on the distance from the satellite to the targeted terminal and the altitude of
+    the satellite.  In this case, we will consider the targeted terminal to be at the center of the boresight pointing
+    direction so the gain compensation only depends on where it's pointing.
+    """
+    radius_of_Earth__km = 6371
+    orbital_radius__km = radius_of_Earth__km + altitude__km
+    """General Equation:  
+    orbital_radius__km * np.cos(theta__rad)
+    +/- np.sqrt(radius_of_Earth__km**2 - orbital_radius__km**2 * (np.sin(theta__rad))**2)"""
+    d_sqrt_component__km = np.sqrt(radius_of_Earth__km**2 - orbital_radius__km**2 * (np.sin(theta__rad))**2)
+    d_cos_component__km = orbital_radius__km * np.cos(theta__rad)
+    if d_cos_component__km - d_sqrt_component__km < 0:
+        d_terminal__km = d_cos_component__km + d_sqrt_component__km
+    else:
+        d_terminal__km = d_cos_component__km - d_sqrt_component__km
+
+    compensatedGain = d_terminal__km**2 / altitude__km**2
+    return compensatedGain
 
 def testExclusionZone(frequency=3e9,
                       eirp=0,
@@ -167,8 +254,8 @@ def testExclusionZone(frequency=3e9,
 
 def main():
     # print(pointToPoint())
-    testExclusionZone()
-
+    # testExclusionZone()
+    testTxPFD()
 
 if __name__ == "__main__":
     main()
