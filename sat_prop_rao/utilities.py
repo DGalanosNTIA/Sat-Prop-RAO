@@ -13,11 +13,30 @@ from scipy.optimize import fsolve
 from scipy.spatial import ConvexHull, Delaunay
 
 
-def wgs84SurfaceLineIntersection(t, x0,y0,z0,vx,vy,vz):
-    # WGS84 ellipsoid constants
-    a = 6378137.0  # Semi-major axis (meters)
-    b = 6356752.3142  # Semi-minor axis (meters)
-    return ((x0 + t*vx)**2)/(a**2) + ((y0 + t*vy)**2)/(a**2) + ((z0 + t*vz)**2)/(b**2) - 1
+
+def hcsLatLonElToEcefDirection(az,horizonEl,lat,lon,el):
+    # horizontal coordinate system, azimuth counter-clockwise from due north (deg), elevation above horizon (deg)
+    
+    # convert to radians
+    az = 2*np.pi*az/360;
+    el = 2*np.pi*horizonEl/360;
+    
+    # rotate up from north by el
+    v = np.matmul([[1,0,0],
+                   [0, np.cos(el), -np.sin(el)],
+                   [0, np.sin(el),  np.cos(el)]],
+                   [0,1,0]) # north
+                   
+    # rotate counter-clockwise by az
+    v = np.matmul([[np.cos(az), -np.sin(az),0],
+                   [np.sin(az),  np.cos(az),0],
+                   [0,0,1]],
+                   v)
+
+    # ecef position
+    r = wgs84ToEcef(lat, lon, el)
+    
+    return unitVector(np.array(enuLatLonElToEcef(*v,lat,lon,el)) - r)
 
 def wgs84ToEcef(lat, lon, el):
     # WGS84 ellipsoid constants
@@ -37,47 +56,34 @@ def wgs84ToEcef(lat, lon, el):
     Y = (N + el) * np.cos(lat_rad) * np.sin(lon_rad)
     Z = ((b ** 2 / a ** 2) * N + el) * np.sin(lat_rad)
 
-    return X, Y, Z
+    return X,Y,Z
 
-
-def enuToEcefHeading(e, n, u, lat, lon, el):
-    # only valid for small ENU, used as a pointing vector
-
-    # get ecef of reference
-    x_ref, y_ref, z_ref = wgs84ToEcef(lat, lon, el)
-
-    # force enu to be a unit vector
-    e, n, u = unitVector(np.array([e, n, u]))
+def enuLatLonElToEcef(e, n, u, lat, lon, el):
+    # get ecef of reference location
+    r = np.array(wgs84ToEcef(lat, lon, el))
     
-    k = 100
-    # north -> positive latitude (for small n)
-    lat2 = lat + n / k
+    # generate local basis vectors for +e, +n, +u
+    b_e = unitVector(np.array(wgs84ToEcef(lat, lon+1e-6, el)) - r)
+    b_n = unitVector(np.array(wgs84ToEcef(lat+1e-6, lon, el)) - r)
+    b_u = unitVector(np.array(wgs84ToEcef(lat, lon, el+1e-3)) - r)
 
-    # east -> positive longitude (for small e)
-    lon2 = lon + e / k
-
-    # up and el add
-    el2 = el + u
-
-    # approximate solution
-    x_rough, y_rough, z_rough = wgs84ToEcef(lat2, lon2, el2)
-
-    # create a unit vector corresponding to ecef heading
-    u = unitVector(
-        np.array([x_rough - x_ref, y_rough - y_ref, z_rough - z_ref]))
-
-    return u[0], u[1], u[2]
-
+    # vector sum reference location and scaled basis vectors
+    return r + e*b_e + n*b_n + u*b_u
 
 def unitVector(u):
     return u / norm(u)
-
 
 def relativeAngle(u, v):
     # ensures angles are unitary
     u = unitVector(u)
     v = unitVector(v)
     return np.arccos(np.clip(np.dot(u, v), -1.0, 1.0))
+    
+def wgs84SurfaceLineIntersection(t,x0,y0,z0,vx,vy,vz):
+    # WGS84 ellipsoid constants
+    a = 6378137.0  # Semi-major axis (meters)
+    b = 6356752.3142  # Semi-minor axis (meters)
+    return ((x0 + t*vx)**2)/(a**2) + ((y0 + t*vy)**2)/(a**2) + ((z0 + t*vz)**2)/(b**2) - 1
 
 class FieldOfViewOnEarthSurface():
     def __init__(self,observerLatLonEl,boundaryPrecisionDegrees=1):
@@ -115,7 +121,7 @@ class FieldOfViewOnEarthSurface():
                 else:
                     latLonOutFOV.append([lat,lon]) # the solution converged in front of start point -> out FOV
         
-        # keeping these around for debugging purposes, if this function gets called a lot this should be deleted
+        # keeping these around for debugging purposes, if this function gets called a lot, this should be deleted
         self._latLonInFOV = np.array(latLonInFOV)
         self._latLonOutFOV = np.array(latLonOutFOV)
         
