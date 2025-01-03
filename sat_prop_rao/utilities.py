@@ -1,6 +1,7 @@
 '''
 This module contains various utility functions to support vector math, unit conversion.
 '''
+import warnings
 import numpy as np
 from numpy.linalg import norm
 from bisect import bisect_left
@@ -8,6 +9,15 @@ import random
 from skyfield.api import load, Topos
 from skyfield.iokit import parse_tle_file
 from skyfield.toposlib import wgs84
+from scipy.optimize import fsolve
+from scipy.spatial import ConvexHull, Delaunay
+
+
+def wgs84SurfaceLineIntersection(t, x0,y0,z0,vx,vy,vz):
+    # WGS84 ellipsoid constants
+    a = 6378137.0  # Semi-major axis (meters)
+    b = 6356752.3142  # Semi-minor axis (meters)
+    return ((x0 + t*vx)**2)/(a**2) + ((y0 + t*vy)**2)/(a**2) + ((z0 + t*vz)**2)/(b**2) - 1
 
 def wgs84ToEcef(lat, lon, el):
     # WGS84 ellipsoid constants
@@ -38,12 +48,13 @@ def enuToEcefHeading(e, n, u, lat, lon, el):
 
     # force enu to be a unit vector
     e, n, u = unitVector(np.array([e, n, u]))
-
+    
+    k = 100
     # north -> positive latitude (for small n)
-    lat2 = lat + n / 1e6
+    lat2 = lat + n / k
 
     # east -> positive longitude (for small e)
-    lon2 = lon + e / 1e6
+    lon2 = lon + e / k
 
     # up and el add
     el2 = el + u
@@ -68,6 +79,87 @@ def relativeAngle(u, v):
     v = unitVector(v)
     return np.arccos(np.clip(np.dot(u, v), -1.0, 1.0))
 
+class FieldOfViewOnEarthSurface():
+    def __init__(self,observerLatLonEl,boundaryPrecisionDegrees=1):
+        
+        # observer position in ECEF
+        observerPosition = np.array(wgs84ToEcef(*observerLatLonEl))
+        
+        # generate lat/lon lattice spanning earth
+        latLimit = 90
+        lonLimit = 180
+        lats = np.linspace(-latLimit,latLimit,int((2*latLimit+1)/boundaryPrecisionDegrees))
+        lons = np.linspace(-lonLimit,lonLimit,int((2*lonLimit+1)/boundaryPrecisionDegrees))
+        
+        # compute which lat,lon pairs are in and out of FOV
+        latLonInFOV = []
+        latLonOutFOV = []
+        for lat in lats:
+            for lon in lons:
+                surfaceLatLonEl = [lat, lon, 1]
+                surfacePosition = np.array(wgs84ToEcef(*surfaceLatLonEl))
+                
+                # vector from surface point to observer position
+                vector = unitVector(observerPosition - surfacePosition)
+                
+                # check if vector intersects WGS84 ellipsoid
+                initalGuess = 0 # corresponds to start of vector (surfacePosition)
+                with warnings.catch_warnings() as caught_warnings:
+                    warnings.filterwarnings("ignore", message="The iteration is not making good progress")
+                    solution = fsolve(wgs84SurfaceLineIntersection,initalGuess,args=(*surfacePosition,*vector))
+                
+                if wgs84SurfaceLineIntersection(solution,*surfacePosition,*vector) > 1e-10:
+                    latLonInFOV.append([lat,lon])  # the solution did not converge -> no intersection -> in FOV
+                elif solution < 0:
+                    latLonInFOV.append([lat,lon])  # the solution converged behind the start point -> in FOV
+                else:
+                    latLonOutFOV.append([lat,lon]) # the solution converged in front of start point -> out FOV
+        
+        # keeping these around for debugging purposes, if this function gets called a lot this should be deleted
+        self._latLonInFOV = np.array(latLonInFOV)
+        self._latLonOutFOV = np.array(latLonOutFOV)
+        
+        # convex hull (used to determine perimeter
+        hull = ConvexHull(self._latLonInFOV)
+        self.perimeter = self._latLonInFOV[hull.vertices]
+        
+        # used to determine if a point is within perimeter
+        self._triangulate = Delaunay(self.perimeter)
+
+        self.latBoundary = np.array([np.min(self.perimeter[:,0]), np.max(self.perimeter[:,0])])
+        self.lonBoundary = np.array([np.min(self.perimeter[:,1]), np.max(self.perimeter[:,1])])
+
+    def pointInFOV(self,latLon):
+        return self._triangulate.find_simplex(latLon) >= 0
+        
+    def uniformSample(self,N):
+        out = np.zeros((N,2))
+        K = 0
+        filled = False
+        while not filled:
+            batch = np.zeros((N,2))
+            batch[:,0] = np.random.uniform(low=self.latBoundary[0],high=self.latBoundary[1],size=N)
+            batch[:,1] = np.random.uniform(low=self.lonBoundary[0],high=self.lonBoundary[1],size=N)
+            
+            # points must be within FOV
+            valid = batch[self.pointInFOV(batch)]
+            k = valid.shape[0]
+            
+            if K+k <= N:
+                out[K:K+k,:] = valid
+            else:
+                out[K:N,:] = valid[0:N-K]
+                filled = True
+            # try again until N points within FOV are generated
+            K += k
+        return out
+    
+    def uniformSampleECEF(self,N):
+        x = self.uniformSample(N)
+        out = np.zeros((x.shape[0],3))
+        for i in range(x.shape[0]):
+            out[i,:] = np.array(wgs84ToEcef(*x[i],0))
+        return out
 
 def dBmToWatts(x_dBm):
     return 10 ** ((x_dBm - 30) / 10)
